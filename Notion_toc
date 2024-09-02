@@ -1,0 +1,204 @@
+// ==UserScript==
+// @name         Notion Optimized Outline with Scroll and Faster Load
+// @namespace    http://tampermonkey.net/
+// @version      4.1
+// @description  Sync draggable toggle button and outline container in Notion with scroll support and faster loading
+// @author       ABERNAA
+// @match        https://www.notion.so/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    function createOutlineContainer() {
+        const outlineContainer = document.createElement('div');
+        outlineContainer.id = 'notionOutlineContainer';
+        outlineContainer.style.position = 'fixed';
+        outlineContainer.style.top = '100px'; // Initial top position
+        outlineContainer.style.right = '10px'; // Initial right position
+        outlineContainer.style.width = '250px';
+        outlineContainer.style.maxHeight = '80vh'; // Enable vertical scrolling when content exceeds max height
+        outlineContainer.style.overflowY = 'auto'; // Enable vertical scroll
+        outlineContainer.style.backgroundColor = getComputedStyle(document.body).backgroundColor;
+        outlineContainer.style.border = '1px solid #ccc';
+        outlineContainer.style.padding = '10px';
+        outlineContainer.style.zIndex = '10000';
+        outlineContainer.style.fontSize = '14px';
+        outlineContainer.style.display = 'none'; // Start hidden
+        outlineContainer.style.color = adjustColor(getComputedStyle(document.body).color); // Adjust text color for contrast
+        document.body.appendChild(outlineContainer);
+
+        const toggleButton = document.createElement('button');
+        toggleButton.id = 'notionOutlineToggle';
+        toggleButton.textContent = 'T'; // Change label to 'T'
+        toggleButton.style.position = 'fixed';
+        toggleButton.style.top = '70px'; // Initial top position
+        toggleButton.style.right = '10px'; // Initial right position
+        toggleButton.style.zIndex = '10001';
+        toggleButton.style.padding = '5px'; // Adjust padding for smaller button
+        toggleButton.style.backgroundColor = '#333';
+        toggleButton.style.color = '#fff';
+        toggleButton.style.border = 'none';
+        toggleButton.style.cursor = 'move'; // Change cursor to indicate draggable
+        toggleButton.style.borderRadius = '5px';
+        toggleButton.style.boxShadow = '0 2px 5px rgba(0, 0, 0, 0.2)';
+        toggleButton.style.display = 'inline-block'; // Set display to inline-block
+        toggleButton.style.width = '30px'; // Fix width to prevent stretching and ensure alignment
+        document.body.appendChild(toggleButton);
+
+        toggleButton.addEventListener('click', function () {
+            outlineContainer.style.display = outlineContainer.style.display === 'none' ? 'block' : 'none';
+        });
+
+        // Make both button and container draggable
+        makeDraggable(toggleButton, outlineContainer);
+
+        window.addEventListener('resize', adjustOutlinePosition);
+        adjustOutlinePosition();
+    }
+
+    function makeDraggable(dragElement, targetElement) {
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        dragElement.onmousedown = dragMouseDown;
+
+        function dragMouseDown(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+
+            // Calculate new position for both elements
+            let newTop = dragElement.offsetTop - pos2;
+            let newLeft = dragElement.offsetLeft - pos1;
+
+            // Ensure the elements stay within the viewport
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - dragElement.offsetHeight));
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - dragElement.offsetWidth));
+
+            dragElement.style.top = newTop + "px";
+            dragElement.style.left = newLeft + "px";
+
+            // Sync targetElement with dragElement
+            targetElement.style.top = (newTop + dragElement.offsetHeight + 5) + "px"; // Ensure proper alignment with button
+            targetElement.style.left = newLeft + "px";
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+        }
+    }
+
+    function adjustOutlinePosition() {
+        const outlineContainer = document.getElementById('notionOutlineContainer');
+        if (!outlineContainer) return;
+
+        if (window.innerWidth < 800) {
+            outlineContainer.style.position = 'absolute';
+            outlineContainer.style.top = '';
+            outlineContainer.style.bottom = '10px';
+            outlineContainer.style.right = '10px';
+        } else {
+            outlineContainer.style.position = 'fixed';
+            outlineContainer.style.top = '100px'; // Ensure it stays below the button
+            outlineContainer.style.bottom = '';
+            outlineContainer.style.right = '10px';
+        }
+    }
+
+    function adjustColor(color) {
+        const darkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        return darkMode ? '#fff' : '#000';
+    }
+
+    function throttle(func, limit) {
+        let inThrottle;
+        return function () {
+            const args = arguments;
+            const context = this;
+            if (!inThrottle) {
+                func.apply(context, args);
+                inThrottle = true;
+                setTimeout(() => (inThrottle = false), limit);
+            }
+        };
+    }
+
+    function updateOutline() {
+        const outlineContainer = document.getElementById('notionOutlineContainer');
+        if (!outlineContainer) return;
+
+        outlineContainer.innerHTML = ''; // Clear previous outline
+
+        const headings = document.querySelectorAll('h2, h3, h4, h5, h6'); // Exclude H1 to act as H0
+        if (headings.length === 0) {
+            outlineContainer.textContent = 'N'; // Display "N" if no headings are found
+            return;
+        }
+
+        const headingElements = Array.from(headings).map((heading) => ({
+            element: heading,
+            level: parseInt(heading.tagName[1], 10) - 1, // Adjust level to treat H1 as H0
+            text: heading.textContent,
+        }));
+
+        let minLevel = Math.min(...headingElements.map((h) => h.level));
+        headingElements.forEach((heading) => {
+            const currentLevel = heading.level;
+
+            const headingLink = document.createElement('a');
+            headingLink.textContent = `H${currentLevel}: ${heading.text}`;
+            headingLink.href = '#';
+            headingLink.style.display = 'block';
+            headingLink.style.marginBottom = '5px';
+            headingLink.style.color = adjustColor(getComputedStyle(document.body).color);
+            headingLink.style.cursor = 'pointer';
+            headingLink.style.paddingLeft = `${(currentLevel - minLevel) * 20}px`;
+
+            headingLink.onclick = function (event) {
+                event.preventDefault();
+                document.querySelectorAll('#notionOutlineContainer a').forEach((link) => {
+                    link.style.backgroundColor = '';
+                });
+                headingLink.style.backgroundColor = '#ddd';
+                heading.element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+
+            outlineContainer.appendChild(headingLink);
+        });
+    }
+
+    function observePageChanges() {
+        let timeout;
+        const observer = new MutationObserver(() => {
+            clearTimeout(timeout);
+            timeout = setTimeout(updateOutline, 300); // Use a shorter timeout to batch updates, reducing load
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+        });
+
+        setTimeout(updateOutline, 500); // Initial update after a delay to ensure DOM stability
+    }
+
+    function init() {
+        createOutlineContainer();
+        observePageChanges();
+    }
+
+    window.addEventListener('load', init);
+})();
